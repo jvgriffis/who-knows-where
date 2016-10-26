@@ -1,117 +1,93 @@
-const homepage = {
-  colorOptions: [ '#002635', '#013440', '#AB1A25', '#D97925' ]
-};
+(function() {
 
-AJAX.get('/api/homepage/title')
-      .then((results) => {
-        homepage.title = results.title;
-        homepage.subtitle = results.subtitle;
-        updateContent("title", homepage.title);
-        updateContent("subtitle", homepage.subtitle);
-        DOM.withID("title-input").value = results.title;
-        DOM.withID("subtitle-input").value = results.subtitle;
-      })
-      .catch((error) => {
-        console.log(error);
-      });
+var map = null;
+var layersControl = null;
 
-var updateSize = (id, value) => {
-  if(value.target){ value = value.target.value; }
+var getMap = function() {
 
-  var element = DOM.withID(id);
-  element.style["font-size"] = (!!value) ? value + "px" : "";
-};
+	if (map != null) {
+		console.log('map already');
+		return Q.resolve(map);
+	}
 
-var updateBackgroundColor = (id, value) => {
-  if(value.target){ value = value.target.value; }
+	console.log('new map');
+	return Q(true)
+	.then(function() {
+		map = L.map('map').fitBounds([[ 50, -66 ], [ 24, -126 ]]);
+		L.tileLayer('http://{s}.tile.stamen.com/toner-lite/{z}/{x}/{y}.png', {
+			subdomains: ['a','b','c','d']
+		}).addTo(map);
 
-  var element = DOM.withID(id);
-  element.style["background-color"] = value;
-};
+		var layersControl = L.control.layers();
+		layersControl.addTo(map);
+		map.getLayersControl = function() { return layersControl; };
 
-var updateContent = (id, value) => {
-  if(value.target){ value = value.target.value; }
+		return map;
+	});
+}
 
-  var element = DOM.withID(id);
-  element.innerHTML = value;
-};
+var startup = function() {
+	L.Icon.Default.imagePath = '/media/images/leaflet';
 
-var toggleConnection = () => {
-  if(homepage.socket){ SOCKET.disconnect(); }
-  else{ SOCKET.connect(); }
-};
+	var circle = {
+		radius: 5,
+		fillColor: "#ff7800",
+		color: "#000",
+		weight: 1,
+		opacity: 1,
+		fillOpacity: 0.8
+	}
 
-SOCKET.on('connect', () => {
-  var element = DOM.withID("io-status");
-  element.style.color = "green";
-  element.innerHTML = "&ofcir;&nbsp;good";
-  homepage.socket = true;
+	getMap()
+	.then(function(map) {
+		return Q.all([map, AJAX.get('./data/mapzen.geojson')]);
+	})
+	.spread(function(map, geojson) {
+		var mapzen = L.geoJson(geojson, {
+			pointToLayer: function(p, ll) {
+				return L.circleMarker(ll, circle);
+			}
+		});
+
+		map.getLayersControl().addOverlay(mapzen, 'Mapzen Results');
+		mapzen.addTo(map);
+
+		return Q.all([map, AJAX.get('./data/bing.geojson')]);
+	})
+	.spread(function(map, geojson) {
+		circle.fillColor = '#78ff00';
+		var bings = L.geoJson(geojson, {
+			pointToLayer: function(p, ll) {
+				return L.circleMarker(ll, circle);
+			}
+		});
+
+		map.getLayersControl().addOverlay(bings, 'Bing Results');
+		bings.addTo(map);
+	})
+	.catch(function(e) {
+		console.warn(e);
+	});
+}
+
+var loadBatch = function() {
+}
+
+var doSearch = function() {
+}
+
+var routes = {
+	'/': startup,
+	'/batch_results': loadBatch,
+	'/search': doSearch
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+
+	var router = Router(routes);
+	router.init();
+
+	window.location = '#/';
 });
 
-SOCKET.on('disconnect', () => {
-  var element = DOM.withID("io-status");
-  element.style.color = "red";
-  element.innerHTML = "&olcir;&nbsp;bad";
-  homepage.socket = false;
-});
-
-SOCKET.on('reconnect', () => {
-  var element = DOM.withID("io-status");
-  element.style.color = "green";
-  element.innerHTML = "&ofcir;&nbsp;good";
-  homepage.socket = true;
-});
-
-SOCKET.on("message:down", (message) => {
-  const node = document.createElement("li");
-  const span = document.createElement("span");
-  node.appendChild(document.createTextNode(message.message));
-  span.appendChild(document.createTextNode(DOM.readableTime(new Date(message.time))));
-  node.appendChild(span);
-  DOM.conversation.appendChild(node);
-
-  if(DOM.conversation.autoScroll){
-    DOM.conversation.scrollTop = DOM.conversation.scrollHeight;
-  }
-});
-
-// now let's set up the other stuff:
-updateBackgroundColor('title-container', homepage.colorOptions[0]); // default background-color:
-updateBackgroundColor('button-0', homepage.colorOptions[0]);
-updateBackgroundColor('button-1', homepage.colorOptions[1]);
-updateBackgroundColor('button-2', homepage.colorOptions[2]);
-updateBackgroundColor('button-3', homepage.colorOptions[3]);
-updateContent('button-0', homepage.colorOptions[0]);
-updateContent('button-1', homepage.colorOptions[1]);
-updateContent('button-2', homepage.colorOptions[2]);
-updateContent('button-3', homepage.colorOptions[3]);
-
-DOM.withID("io-status").style.color = "red";
-
-DOM.on(window, "load", (loadEvent) => {
-  DOM.form = DOM.withID("message-form");
-  DOM.formInput = DOM.withID("message-input");
-  DOM.conversation = DOM.withID("message-stream");
-  DOM.conversation.autoScroll = true;
-
-  DOM.on(DOM.form, "submit", (submitEvent) => {
-    submitEvent.preventDefault();
-
-    SOCKET.emit("message:up", { message: DOM.formInput.value, time: Date.now() });
-    DOM.formInput.value = "";
-
-    return false;
-  });
-
-  DOM.on(DOM.conversation, "scroll", function(scrollEvent){
-    var scrollPos = DOM.conversation.scrollTop;
-    var actualHeight = DOM.conversation.scrollHeight;
-    var visibleHeight = DOM.conversation.clientHeight;
-
-    var pxFromBottom = ( actualHeight - visibleHeight ) - scrollPos;
-
-    DOM.conversation.autoScroll = (actualHeight > visibleHeight && pxFromBottom <= 20);
-
-  });
-
-});
+})();

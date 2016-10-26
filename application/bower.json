@@ -14,7 +14,8 @@
   ],
   "devDependencies": {},
   "dependencies": {
-    "bootstrap": "^3.3.5",
-    "socket.io-client": "^1.4.8"
+    "director": "^1.2.8",
+    "leaflet": "leaflet-dist#^0.7.2",
+    "q": "1.0.1"
   }
 }
